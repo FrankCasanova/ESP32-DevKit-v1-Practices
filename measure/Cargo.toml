@@ -8,7 +8,7 @@ name = "measure"
 path = "./src/bin/main.rs"
 
 [dependencies]
-esp-bootloader-esp-idf = "0.2.0"
+esp-bootloader-esp-idf = "0.1.0"
 esp-hal = { version = "=1.0.0-beta.1", features = [
   "esp32",
   "log-04",

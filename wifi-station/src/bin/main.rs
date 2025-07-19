@@ -43,8 +43,8 @@ fn init_hardware() -> Peripherals {
     peripherals
 }
 
-const SSID: &str = "sagemcomD440";
-const PASSWORD: &str = "QMN2Q2YWUWMXEM";
+const SSID: &str = "ssid";
+const PASSWORD: &str = "pass";
 
 #[main]
 fn main() -> ! {
