@@ -1,20 +1,21 @@
 #![no_std]
 #![no_main]
 
-use defmt::info;
+use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_net::dns::DnsSocket;
 use embassy_net::tcp::client::{TcpClient, TcpClientState};
 use embassy_net::{DhcpConfig, Runner, Stack, StackResources};
 use embassy_time::{Duration, Timer};
+use embedded_io_async::Read;
 use esp_hal::clock::CpuClock;
 use esp_hal::rng::Rng;
 use esp_hal::timer::timg::TimerGroup;
-use esp_println as _;
 use esp_println::println;
 use esp_wifi::wifi::{self, WifiController, WifiDevice, WifiEvent, WifiState};
 use esp_wifi::EspWifiController;
 use reqwless::client::{HttpClient, TlsConfig};
+use reqwless::request::RequestBuilder;
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -34,8 +35,8 @@ macro_rules! mk_static {
 }
 
 esp_bootloader_esp_idf::esp_app_desc!();
-const SSID: &str = "ssid";
-const PASSWORD: &str = "pass";
+const SSID: &str = "SSID";
+const PASSWORD: &str = "PASSWORD";
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
@@ -43,7 +44,7 @@ async fn main(spawner: Spawner) {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    esp_alloc::heap_allocator!(size: 128 * 1024);
+    esp_alloc::heap_allocator!(size: 72 * 1024);
 
     let timer0 = TimerGroup::new(peripherals.TIMG1);
     esp_hal_embassy::init(timer0.timer0);
@@ -150,35 +151,87 @@ async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
 }
 
 async fn access_website(stack: Stack<'_>, tls_seed: u64) {
-    info!("Making the request!");
     let mut rx_buffer = [0; 4096];
     let mut tx_buffer = [0; 4096];
     let dns = DnsSocket::new(stack);
     let tcp_state = TcpClientState::<1, 4096, 4096>::new();
     let tcp = TcpClient::new(stack, &tcp_state);
-    
+
     let tls = TlsConfig::new(
         tls_seed,
         &mut rx_buffer,
         &mut tx_buffer,
         reqwless::client::TlsVerify::None,
     );
-
+    info!("TLS config created");
+    
     let mut client = HttpClient::new_with_tls(&tcp, &dns, tls);
-    let mut buffer = [0u8; 4096];
-    info!("Setup done, initializing request...");
-    let mut http_req = client
+    let mut buffer = [0u8; 1024]; // Buffer for request headers
+
+    info!("Starting TLS handshake");
+    let mut http_req = match client
         .request(
             reqwless::request::Method::GET,
-            "http://neverssl.com/",
+            "https://readmedium.com/nodejs-internals-and-architecture-0c3488c3fc49",
         )
-        .await
-        .expect("something wrong happened here");
-    let response = http_req.send(&mut buffer).await.unwrap();
-    println!("{:?}", response.status);
-    info!("Got response");
-    let res = response.body().read_to_end().await.unwrap();
+        .await 
+    {
+        Ok(req) => req
+            .headers(&[("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")])
+            .headers(&[("Accept", "text/html")]),
+        Err(e) => {
+            error!("Error creating request");
+            println!("{e:?}");
+            return;
+        }
+    };
 
-    let content = core::str::from_utf8(res).unwrap();
-    println!("{}", content);
+    info!("TLS handshake completed");
+
+    // Send request
+    let response = match http_req.send(&mut buffer).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            error!("Error sending request");
+            println!("{e:?}");
+            return;
+        }
+    };
+
+    info!("Request made");
+    println!("Status Code: {:?}", response.status);
+
+    // Read the body in chunks
+    let mut body_reader = response.body().reader();
+    let mut chunk_count = 0;
+    let deadline = embassy_time::Instant::now() + Duration::from_secs(30);
+
+    while embassy_time::Instant::now() < deadline {
+        let mut chunk_buffer = [0u8; 512];
+        match body_reader.read(&mut chunk_buffer).await {
+            Ok(0) => {
+                info!("End of response");
+                break;
+            }
+            Ok(len) => {
+                chunk_count += 1;
+                match core::str::from_utf8(&chunk_buffer[..len]) {
+                    Ok(text) => {
+                        println!("--- Chunk {} ---", chunk_count);
+                        println!("{}", text);
+                    }
+                    Err(e) => {
+                        info!("Received non-UTF8 data in chunk");
+                        println!("{e:?}");
+                    }
+                }
+            }
+            Err(e) => {
+                info!("Response bytes finished o Chunk error...");
+                println!("{e:?}");
+                break;
+            }
+        }
+    }
 }
+

@@ -62,10 +62,6 @@ reqwless = { version = "0.13.0", default-features = false, features = [
 ] }
 
 
-
-
-
-
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization
