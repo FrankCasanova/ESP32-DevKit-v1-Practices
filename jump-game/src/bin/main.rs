@@ -8,11 +8,9 @@
 
 use defmt::info;
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
+use embassy_time::Timer;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Input, InputConfig, Pull};
-use esp_hal::i2c;
-use esp_hal::i2c::master::I2c;
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
@@ -48,7 +46,7 @@ async fn main(_spawner: Spawner) {
     // let i2c = i2c::I2c::new_async(peripherals.I2C1, scl, sda, Irqs, i2c::Config::default());
     let i2c_bus = esp_hal::i2c::master::I2c::new(
         peripherals.I2C0,
-        esp_hal::i2c::master::Config::default().with_frequency(Rate::from_khz(90))
+        esp_hal::i2c::master::Config::default().with_frequency(Rate::from_khz(120))
     )
     .unwrap()
     .with_scl(peripherals.GPIO18)
