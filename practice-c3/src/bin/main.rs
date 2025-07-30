@@ -6,7 +6,6 @@
     holding buffers for the duration of a data transfer."
 )]
 
-use alloc::string::{self, ToString};
 use core::cell::RefCell;
 use core::cell::UnsafeCell;
 use core::fmt::Write;
@@ -20,19 +19,19 @@ use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::Point;
 use embedded_graphics::text::{Baseline, Text};
 use embedded_graphics::Drawable;
+use esp_backtrace as _;
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{DriveMode, Flex, Input, InputConfig, Level, OutputConfig, Pull};
 use esp_hal::time::Rate;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::{clock::CpuClock, gpio::Output};
 use esp_println::println;
-use heapless::{Deque, String};
+use heapless::String;
 use ssd1306::mode::DisplayConfigAsync;
 use ssd1306::prelude::DisplayRotation;
 use ssd1306::size::DisplaySize128x64;
 use ssd1306::{I2CDisplayInterface, Ssd1306Async};
 use static_cell::StaticCell;
-use {esp_backtrace as _, esp_println as _};
 
 extern crate alloc;
 
@@ -56,10 +55,7 @@ async fn temperature_task(
             Ok(sensor_reading) => {
                 // Update the shared temperature data
                 unsafe {
-                    *temperature_data.get() = (
-                        sensor_reading.temperature,
-                        sensor_reading.humidity,
-                    );
+                    *temperature_data.get() = (sensor_reading.temperature, sensor_reading.humidity);
                 }
             }
             Err(_) => {
@@ -137,7 +133,9 @@ async fn main(spawner: Spawner) {
 
     // Spawn the temperature reading task
     let temperature_data = TEMPERATURE_DATA.init(UnsafeCell::new((0.0, 0.0)));
-    spawner.spawn(temperature_task(dht22, temperature_data)).unwrap();
+    spawner
+        .spawn(temperature_task(dht22, temperature_data))
+        .unwrap();
 
     // Give the sensor some time to initialize
     Timer::after(Duration::from_secs(2)).await;
@@ -148,10 +146,10 @@ async fn main(spawner: Spawner) {
         display.clear_buffer();
 
         let (temperature, humidity) = unsafe { *temperature_data.get() };
-        write!(buffer2, "{} {}", temperature, humidity).unwrap();
-            Text::with_baseline(&buffer2, Point::new(0, 0), text_style, Baseline::Top)
-                .draw(&mut display)
-                .unwrap();
+        write!(buffer2, "{}C {}%", temperature, humidity).unwrap();
+        Text::with_baseline(&buffer2, Point::new(0, 0), text_style, Baseline::Top)
+            .draw(&mut display)
+            .unwrap();
 
         let button_is_pressed = button.is_low();
 
