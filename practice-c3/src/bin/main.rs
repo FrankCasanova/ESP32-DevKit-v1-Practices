@@ -9,6 +9,8 @@
 use defmt::info;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
+use embedded_graphics::mono_font::iso_8859_16::FONT_7X13_ITALIC;
+use embedded_graphics::mono_font::iso_8859_4::FONT_10X20;
 use embedded_graphics::mono_font::MonoTextStyleBuilder;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::text::{Baseline, Text};
@@ -22,7 +24,7 @@ use ssd1306::mode::DisplayConfigAsync;
 use ssd1306::prelude::DisplayRotation;
 use ssd1306::size::DisplaySize128x64;
 use ssd1306::{I2CDisplayInterface, Ssd1306Async};
-use embedded_graphics::mono_font::iso_8859_10::FONT_6X10;
+use embedded_graphics::mono_font::iso_8859_10::{FONT_6X10, FONT_7X13_BOLD};
 use heapless::String;
 use core::fmt::Write;
 use {esp_backtrace as _, esp_println as _};
@@ -58,7 +60,7 @@ async fn main(_spawner: Spawner) {
         // Configure display
     let i2c_bus = esp_hal::i2c::master::I2c::new(
         peripherals.I2C0,
-        esp_hal::i2c::master::Config::default().with_frequency(Rate::from_khz(400)),
+        esp_hal::i2c::master::Config::default().with_frequency(Rate::from_khz(100)),
     )
     .unwrap()
     .with_scl(peripherals.GPIO4)
@@ -74,7 +76,7 @@ async fn main(_spawner: Spawner) {
     .into_buffered_graphics_mode();
     display.init().await.unwrap();
     let text_style = MonoTextStyleBuilder::new()
-        .font(&FONT_6X10)
+        .font(&FONT_7X13_BOLD)
         .text_color(BinaryColor::On)
         .build();
 
@@ -104,7 +106,12 @@ async fn main(_spawner: Spawner) {
         // Display message when LED is on
         if led_is_on {
             write!(buffer, "Led Green is ON!").unwrap();
-            Text::with_baseline(&buffer, Point::new(20, 20), text_style, Baseline::Top)
+            Text::with_baseline(&buffer, Point::new(10, 20), text_style, Baseline::Top)
+                .draw(&mut display)
+                .unwrap();
+        } else {
+            write!(buffer, "Led Green is OFF!").unwrap();
+            Text::with_baseline(&buffer, Point::new(10, 20), text_style, Baseline::Top)
                 .draw(&mut display)
                 .unwrap();
         }
