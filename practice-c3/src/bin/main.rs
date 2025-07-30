@@ -94,16 +94,21 @@ async fn main(_spawner: Spawner) {
                 led_is_on = false;
             } else {
                 led.set_high();
-                write!(buffer, "Led Green is ON!").unwrap();
-                Text::with_baseline(&buffer, Point::new(90, 0), text_style, Baseline::Top)
-                    .draw(&mut display)
-                    .unwrap();
                 buzzer_led_on(&mut buzzer).await;
                 led_is_on = true;
             }
 
             Timer::after(Duration::from_millis(200)).await;
         }
+        
+        // Display message when LED is on
+        if led_is_on {
+            write!(buffer, "Led Green is ON!").unwrap();
+            Text::with_baseline(&buffer, Point::new(20, 20), text_style, Baseline::Top)
+                .draw(&mut display)
+                .unwrap();
+        }
+        
         button_was_pressed = button_is_pressed;
         
         display.flush().await.unwrap();
