@@ -32,7 +32,6 @@ use ssd1306::prelude::DisplayRotation;
 use ssd1306::size::DisplaySize128x64;
 use ssd1306::{I2CDisplayInterface, Ssd1306Async};
 use static_cell::StaticCell;
-
 extern crate alloc;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
@@ -132,7 +131,7 @@ async fn main(spawner: Spawner) {
     let dht22 = dht22::Dht22::new(od_for_dht22, delay);
 
     // Spawn the temperature reading task
-    let temperature_data = TEMPERATURE_DATA.init(UnsafeCell::new((0.0, 0.0)));
+    let temperature_data = TEMPERATURE_DATA.init_with(||UnsafeCell::new((0.0, 0.0)));
     spawner
         .spawn(temperature_task(dht22, temperature_data))
         .unwrap();

@@ -154,12 +154,14 @@ async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
 }
 
 async fn access_website(stack: Stack<'_>, tls_seed: u64) {
-    let mut rx_buffer = [0; 8192];
-    let mut tx_buffer = [0; 8192];
+    let mut rx_buffer = [0; 16384]; // Increased buffer size
+    let mut tx_buffer = [0; 16384]; // Increased buffer size
     let dns = DnsSocket::new(stack);
-    let tcp_state = TcpClientState::<1, 4096, 4096>::new();
+    let tcp_state = TcpClientState::<1, 8192, 8192>::new(); // Increased buffer sizes
     let tcp = TcpClient::new(stack, &tcp_state);
 
+    // Try different TLS configurations
+    info!("Creating TLS config...");
     let tls = TlsConfig::new(
         tls_seed,
         &mut rx_buffer,
@@ -169,31 +171,35 @@ async fn access_website(stack: Stack<'_>, tls_seed: u64) {
     info!("TLS config created");
 
     let mut client = HttpClient::new_with_tls(&tcp, &dns, tls);
-    let mut buffer = [0u8; 2048];
+    
+    // Try to connect with a simpler request first
+    info!("Attempting connection with simpler request...");
+    let mut buffer = [0u8; 8096];
 
-    // Fix the URL - remove trailing spaces
-    info!("Starting TLS handshake");
+    // Try to connect to the server
+    info!("Attempting to connect to server...");
     let mut http_req = match client
         .request(
             reqwless::request::Method::GET,
-            "https://medium.com/",
+            "https://whatismyipaddress.com",
         )
         .await
     {
-        Ok(req) => req
-            .headers(&[
-                ("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"),
-                ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
-                ("Accept-Encoding", "identity"), // Explicitly request uncompressed content
-            ]),
+        Ok(req) => {
+            info!("Request created successfully");
+            req.headers(&[
+                ("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"),
+                ("Connection", "close"),
+            ])
+        },
         Err(e) => {
             error!("Error creating request");
-            println!("{e:?}");
+            println!("Detailed error: {e:?}");
             return;
         }
     };
 
-    info!("TLS handshake completed");
+    info!("Request prepared, sending...");
 
     // Send request
     let response = match http_req.send(&mut buffer).await {
@@ -237,6 +243,16 @@ async fn access_website(stack: Stack<'_>, tls_seed: u64) {
                         if let Some(span) = extract_tag_content(&html_text, "span") {
                             info!("SPAN FOUND: {}", &span);
                             println!("Page span: {}", &span);
+                        }
+                        // Extract content by id (example with "main" id)
+                        if let Some(content) = extract_by_id(&html_text, "main") {
+                            info!("CONTENT BY ID FOUND: {}", &content);
+                            println!("Content by id 'main': {}", &content);
+                        }
+                        // Extract content by class (example with "post" class)
+                        if let Some(content) = extract_by_class(&html_text, "post") {
+                            info!("CONTENT BY CLASS FOUND: {}", &content);
+                            println!("Content by class 'post': {}", &content);
                         }
                     }
                     Err(e) => {
@@ -283,6 +299,147 @@ fn extract_tag_content(html: &str, tag_name: &str) -> Option<heapless::String<25
         pos = actual_start + 1;
     }
 
+    None
+}
+
+/// Extract content by id attribute
+fn extract_by_id(html: &str, id_value: &str) -> Option<heapless::String<256>> {
+    let id_attr = format!("id=\"{}\"", id_value);
+    
+    // Find element with this id
+    let mut pos = 0;
+    while let Some(start_idx) = html[pos..].find(&id_attr) {
+        let actual_start = pos + start_idx;
+
+        // Find the start of the tag (go backwards to '<')
+        let tag_start = match html[..actual_start].rfind('<') {
+            Some(pos) => pos,
+            None => {
+                pos = actual_start + 1;
+                continue;
+            }
+        };
+        
+        // Find the end of the opening tag
+        let tag_end = match html[actual_start..].find('>') {
+            Some(pos) => pos,
+            None => {
+                pos = actual_start + 1;
+                continue;
+            }
+        };
+        
+        let content_start = actual_start + tag_end + 1;
+        
+        // Check if this is a self-closing tag
+        if html[actual_start..(actual_start + tag_end)].contains("/") {
+            // Self-closing tag, no content to extract
+            pos = actual_start + 1;
+            continue;
+        }
+        
+        // Find the closing tag
+        // We need to determine the tag name first
+        let tag_name_start = tag_start + 1;
+        let tag_name_end = html[tag_name_start..actual_start].find(' ').unwrap_or(actual_start - tag_name_start);
+        let tag_name = &html[tag_name_start..tag_name_start + tag_name_end];
+        
+        let close_tag = format!("</{}>", tag_name);
+        if let Some(close_idx) = html[content_start..].find(&close_tag) {
+            let content_end = content_start + close_idx;
+            let content = &html[content_start..content_end];
+            
+            // Try to create heapless String
+            if let Ok(result) = heapless::String::try_from(content) {
+                return Some(result);
+            }
+        }
+        
+        // Move past this element and continue searching
+        pos = actual_start + 1;
+    }
+    
+    None
+}
+
+/// Extract content by class attribute
+fn extract_by_class(html: &str, class_value: &str) -> Option<heapless::String<256>> {
+    let class_attr = format!("class=\"{}\"", class_value);
+    let class_attr_space = format!("class=\"{} ", class_value);
+    let class_attr_end = format!(" {}\"", class_value);
+    
+    // Find element with this class
+    let mut pos = 0;
+    while let Some(start_idx) = html[pos..].find(&class_attr) {
+        let actual_start = pos + start_idx;
+        
+        // Check if this is the exact class or part of multiple classes
+        let is_exact = {
+            // Check if it's at the beginning of class attribute
+            let before_class = &html[pos..actual_start];
+            let after_class = &html[(actual_start + class_attr.len())..];
+            
+            // If it's at the start and either ends with " or is followed by a space, it's exact
+            (before_class.ends_with("class=\"") && (after_class.starts_with("\"") || after_class.starts_with(" "))) ||
+            // Or if it's in the middle/end and surrounded by spaces or quotes
+            (!before_class.is_empty() && (before_class.ends_with(" ") || before_class.ends_with("\"")) && 
+             (after_class.starts_with(" ") || after_class.starts_with("\"")))
+        };
+        
+        // If it's not an exact match, continue searching
+        if !is_exact {
+            pos = actual_start + 1;
+            continue;
+        }
+
+        // Find the start of the tag (go backwards to '<')
+        let tag_start = match html[..actual_start].rfind('<') {
+            Some(pos) => pos,
+            None => {
+                pos = actual_start + 1;
+                continue;
+            }
+        };
+        
+        // Find the end of the opening tag
+        let tag_end = match html[actual_start..].find('>') {
+            Some(pos) => pos,
+            None => {
+                pos = actual_start + 1;
+                continue;
+            }
+        };
+        
+        let content_start = actual_start + tag_end + 1;
+        
+        // Check if this is a self-closing tag
+        if html[actual_start..(actual_start + tag_end)].contains("/") {
+            // Self-closing tag, no content to extract
+            pos = actual_start + 1;
+            continue;
+        }
+        
+        // Find the closing tag
+        // We need to determine the tag name first
+        let tag_name_start = tag_start + 1;
+        let tag_name_end = html[tag_name_start..actual_start].find(' ').unwrap_or(actual_start - tag_name_start);
+        let tag_name = &html[tag_name_start..tag_name_start + tag_name_end];
+        
+        let close_tag = format!("</{}>", tag_name);
+        if let Some(close_idx) = html[content_start..].find(&close_tag) {
+            let content_end = content_start + close_idx;
+            let content = &html[content_start..content_end];
+            
+            // Try to create heapless String
+            if let Ok(result) = heapless::String::try_from(content) {
+                return Some(result);
+            }
+        }
+        
+        // Move past this element and continue searching
+        pos = actual_start + 1;
+    }
+    
     None
 }
 
